@@ -7,6 +7,9 @@ import os from 'os';
 import { db, storage } from '../firebase.js';
 import { requireAdmin, requireAuth } from '../middleware/auth.js';
 import { analyzeComplaint } from '../services/ai.js';
+import { messaging } from '../firebase.js';
+import { sendComplaintStatusNotification } from '../services/notifications.js';
+import { createComplaintStatusHandler } from '../services/complaint-status.js';
 import {
   MAX_EVIDENCE_SIZE_BYTES,
   normalizeEvidenceFile,
@@ -138,11 +141,9 @@ router.get('/', requireAuth, requireAdmin, async (req,res)=>{
   res.json(snap.docs.map(d=>d.data()).sort((a,b)=>b.createdAt.localeCompare(a.createdAt)));
 });
 
-router.patch('/:id/status', requireAuth, requireAdmin, async (req,res)=>{
-  const {status, resolutionNote=''} = req.body;
-  if (!['PENDING','IN_PROGRESS','RESOLVED','REJECTED'].includes(status)) return res.status(400).json({error:'Invalid status'});
-  await db.collection('complaints').doc(req.params.id).update({status,resolutionNote,updatedAt:new Date().toISOString()});
-  res.json({ok:true});
-});
+router.patch('/:id/status', requireAuth, requireAdmin, createComplaintStatusHandler({
+  db,
+  notifyStatus: ({complaintId, status}) => sendComplaintStatusNotification({db, messaging, complaintId, status})
+}));
 
 export default router;

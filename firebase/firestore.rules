@@ -16,5 +16,9 @@ service cloud.firestore {
 
       allow delete: if false;
     }
+
+    match /fcmTokens/{tokenHash} {
+      allow read, write: if false;
+    }
   }
 }

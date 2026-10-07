@@ -25,4 +25,5 @@ if (hasFirebaseCredentials) {
 export const db = app ? admin.firestore() : null;
 export const storage = app ? admin.storage(app).bucket(storageBucket) : null;
 export const auth = app ? admin.auth() : null;
+export const messaging = app ? admin.messaging(app) : null;
 export default admin;

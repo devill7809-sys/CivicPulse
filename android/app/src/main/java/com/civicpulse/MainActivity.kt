@@ -5,8 +5,10 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.OpenableColumns
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -22,6 +24,7 @@ import androidx.core.content.ContextCompat
 import com.google.android.gms.location.LocationServices
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.messaging.FirebaseMessaging
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
@@ -39,12 +42,30 @@ import java.util.concurrent.TimeUnit
 private val categories=listOf("POTHOLE","GARBAGE","STREETLIGHT","WATER_LEAKAGE","DRAINAGE","DAMAGED_ROAD","OTHER")
 private val client=OkHttpClient.Builder().connectTimeout(20,TimeUnit.SECONDS).readTimeout(60,TimeUnit.SECONDS).build()
 
-class MainActivity:ComponentActivity(){ override fun onCreate(savedInstanceState:Bundle?){super.onCreate(savedInstanceState);setContent{CivicPulseApp(this)}} }
+class MainActivity:ComponentActivity(){
+ var notificationComplaintId by mutableStateOf<String?>(null)
+ private set
+ var notificationStatus by mutableStateOf<String?>(null)
+ private set
+ override fun onCreate(savedInstanceState:Bundle?){super.onCreate(savedInstanceState);readNotificationIntent(intent);setContent{CivicPulseApp(this,notificationComplaintId,notificationStatus)}}
+ override fun onNewIntent(intent:Intent){super.onNewIntent(intent);setIntent(intent);readNotificationIntent(intent)}
+ private fun readNotificationIntent(intent:Intent?){notificationComplaintId=intent?.getStringExtra(CivicPulseMessagingService.EXTRA_COMPLAINT_ID);notificationStatus=intent?.getStringExtra(CivicPulseMessagingService.EXTRA_STATUS)}
+}
 
-@Composable fun CivicPulseApp(context:Context){
- var screen by remember{mutableStateOf("home")}; val auth=remember{FirebaseAuth.getInstance()}
- if(auth.currentUser==null){ LoginScreen(auth); return }
- MaterialTheme{ Surface(Modifier.fillMaxSize()){ when(screen){"home"->Home({screen="report"},{screen="track"});"report"->Report(context,auth){screen="home"};"track"->Track(auth){screen="home"} } } }
+@Composable fun CivicPulseApp(context:Context,initialComplaintId:String?=null,initialStatus:String?=null){
+ var screen by remember{mutableStateOf(if(initialComplaintId!=null)"track" else "home")}; val auth=remember{FirebaseAuth.getInstance()};var currentUser by remember{mutableStateOf(auth.currentUser)}
+ val notificationPermission=rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()){}
+ DisposableEffect(auth){val listener=FirebaseAuth.AuthStateListener{currentUser=it.currentUser};auth.addAuthStateListener(listener);onDispose{auth.removeAuthStateListener(listener)}}
+ LaunchedEffect(initialComplaintId){if(initialComplaintId!=null)screen="track"}
+ LaunchedEffect(currentUser?.uid){
+  if(currentUser!=null){
+   CivicPulseNotifications.createChannel(context)
+   if(Build.VERSION.SDK_INT>=Build.VERSION_CODES.TIRAMISU&&ContextCompat.checkSelfPermission(context,Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED){notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)}
+   try{val token=FirebaseMessaging.getInstance().token.await();FcmTokenRegistrar.register(context,token)}catch(error:Exception){Log.w("CivicPulseFCM","Unable to register device token",error)}
+  }
+ }
+ if(currentUser==null){ LoginScreen(auth); return }
+ MaterialTheme{ Surface(Modifier.fillMaxSize()){ when(screen){"home"->Home({screen="report"},{screen="track"});"report"->Report(context,auth){screen="home"};"track"->Track(auth,{screen="home"},initialComplaintId,initialStatus) } } }
 }
 
 @Composable fun LoginScreen(auth:FirebaseAuth){
@@ -83,7 +104,7 @@ suspend fun submitComplaint(context:Context,auth:FirebaseAuth,description:String
  }catch(e:Exception){"Submission error: ${e.message}"}finally{evidenceFile?.delete()}
 }
 
-@Composable fun Track(auth:FirebaseAuth,back:()->Unit){var items by remember{mutableStateOf(listOf<Map<String,Any>>())};var message by remember{mutableStateOf("")};val context= LocalContext.current;val scope= rememberCoroutineScope();LaunchedEffect(Unit){FirebaseFirestore.getInstance().collection("complaints").whereEqualTo("citizenId",auth.currentUser?.uid).addSnapshotListener{snap,_->items=snap?.documents?.map{it.data?:emptyMap()}?:emptyList()}};Column(Modifier.padding(22.dp)){Text("My Complaints",style=MaterialTheme.typography.headlineMedium);if(message.isNotEmpty())Text(message);LazyColumn{items(items){m->Column(Modifier.padding(vertical=10.dp)){Text("${m["id"]} • ${m["status"]} • ${m["priority"]}");if(m["evidence"] is Map<*,*>){TextButton(onClick={scope.launch{val url=fetchEvidenceUrl(auth,m["id"].toString());if(url==null)message="Unable to access complaint evidence." else context.startActivity(Intent(Intent.ACTION_VIEW,Uri.parse(url)))}}){Text("View evidence")}}}}};TextButton(back){Text("Back")}}
+@Composable fun Track(auth:FirebaseAuth,back:()->Unit,initialComplaintId:String?=null,initialStatus:String?=null){var items by remember{mutableStateOf(listOf<Map<String,Any>>())};var message by remember{mutableStateOf(initialComplaintId?.let{if(initialStatus!=null)"Complaint $it status updated to $initialStatus." else "Status update for complaint $it."}?:"")};val context= LocalContext.current;val scope= rememberCoroutineScope();LaunchedEffect(Unit){FirebaseFirestore.getInstance().collection("complaints").whereEqualTo("citizenId",auth.currentUser?.uid).addSnapshotListener{snap,_->items=snap?.documents?.map{it.data?:emptyMap()}?:emptyList()}};Column(Modifier.padding(22.dp)){Text("My Complaints",style=MaterialTheme.typography.headlineMedium);if(message.isNotEmpty())Text(message);LazyColumn{items(items){m->Column(Modifier.padding(vertical=10.dp)){Text("${m["id"]} • ${m["status"]} • ${m["priority"]}");if(m["evidence"] is Map<*,*>){TextButton(onClick={scope.launch{val url=fetchEvidenceUrl(auth,m["id"].toString());if(url==null)message="Unable to access complaint evidence." else context.startActivity(Intent(Intent.ACTION_VIEW,Uri.parse(url)))}}){Text("View evidence")}}}}};TextButton(back){Text("Back")}}
 }
 
 suspend fun fetchEvidenceUrl(auth:FirebaseAuth,complaintId:String):String?=withContext(Dispatchers.IO){
