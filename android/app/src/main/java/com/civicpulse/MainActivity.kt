@@ -2,6 +2,7 @@ package com.civicpulse
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
@@ -15,6 +16,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.google.android.gms.location.LocationServices
@@ -74,10 +76,15 @@ fun getLocation(context:Context,done:(Double,Double)->Unit){val c=LocationServic
 
 suspend fun submitComplaint(context:Context,auth:FirebaseAuth,description:String,category:String,lat:String,lng:String,address:String,uri:Uri?):String=withContext(Dispatchers.IO){
  if(description.isBlank()||lat.isBlank()||lng.isBlank())return@withContext "Description and GPS location are required."
+ var evidenceFile:File?=null
  try{val token=auth.currentUser?.getIdToken(false)?.await()?.token?:return@withContext "Authentication token unavailable";val body=MultipartBody.Builder().setType(MultipartBody.FORM).addFormDataPart("description",description).addFormDataPart("category",category).addFormDataPart("lat",lat).addFormDataPart("lng",lng).addFormDataPart("address",address)
-  if(uri!=null){val file=File.createTempFile("evidence",".jpg",context.cacheDir);context.contentResolver.openInputStream(uri)!!.use{input->file.outputStream().use{input.copyTo(it)}};body.addFormDataPart("evidence",file.name,file.asRequestBody("image/*".toMediaType()))}
+  if(uri!=null){val mime=context.contentResolver.getType(uri) ?: "image/jpeg";evidenceFile=File.createTempFile("evidence", ".${mime.substringAfterLast('/')}", context.cacheDir);context.contentResolver.openInputStream(uri)!!.use{input->evidenceFile!!.outputStream().use{input.copyTo(it)}};body.addFormDataPart("evidence",evidenceFile!!.name,evidenceFile!!.asRequestBody(mime.toMediaType()))}
   val req=Request.Builder().url(BuildConfig.API_BASE_URL+"/complaints").addHeader("Authorization","Bearer $token").post(body.build()).build();client.newCall(req).execute().use{r->val txt=r.body?.string().orEmpty();if(!r.isSuccessful)"Submission failed: $txt" else "Complaint submitted successfully. AI analysis and admin review have started."}
- }catch(e:Exception){"Submission error: ${e.message}"}
+ }catch(e:Exception){"Submission error: ${e.message}"}finally{evidenceFile?.delete()}
 }
 
-@Composable fun Track(auth:FirebaseAuth,back:()->Unit){var items by remember{mutableStateOf(listOf<Map<String,Any>>())};LaunchedEffect(Unit){FirebaseFirestore.getInstance().collection("complaints").whereEqualTo("citizenId",auth.currentUser?.uid).addSnapshotListener{snap,_->items=snap?.documents?.map{it.data?:emptyMap()}?:emptyList()}};Column(Modifier.padding(22.dp)){Text("My Complaints",style=MaterialTheme.typography.headlineMedium);LazyColumn{items(items){m->Text("${m["id"]} • ${m["status"]} • ${m["priority"]}",Modifier.padding(vertical=10.dp))}};TextButton(back){Text("Back")}}}
+@Composable fun Track(auth:FirebaseAuth,back:()->Unit){var items by remember{mutableStateOf(listOf<Map<String,Any>>())};var message by remember{mutableStateOf("")};val context= LocalContext.current;val scope= rememberCoroutineScope();LaunchedEffect(Unit){FirebaseFirestore.getInstance().collection("complaints").whereEqualTo("citizenId",auth.currentUser?.uid).addSnapshotListener{snap,_->items=snap?.documents?.map{it.data?:emptyMap()}?:emptyList()}};Column(Modifier.padding(22.dp)){Text("My Complaints",style=MaterialTheme.typography.headlineMedium);if(message.isNotEmpty())Text(message);LazyColumn{items(items){m->Column(Modifier.padding(vertical=10.dp)){Text("${m["id"]} • ${m["status"]} • ${m["priority"]}");if(m["evidence"] is Map<*,*>){TextButton(onClick={scope.launch{val url=fetchEvidenceUrl(auth,m["id"].toString());if(url==null)message="Unable to access complaint evidence." else context.startActivity(Intent(Intent.ACTION_VIEW,Uri.parse(url)))}}){Text("View evidence")}}}}};TextButton(back){Text("Back")}}
+}
+
+suspend fun fetchEvidenceUrl(auth:FirebaseAuth,complaintId:String):String?=withContext(Dispatchers.IO){
+ try{val token=auth.currentUser?.getIdToken(false)?.await()?.token?:return@withContext null;val url=BuildConfig.API_BASE_URL+"/complaints/${Uri.encode(complaintId)}/evidence";val request=Request.Builder().url(url).addHeader("Authorization","Bearer $token").get().build();client.newCall(request).execute().use{response->if(!response.isSuccessful)return@withContext null;JSONObject(response.body?.string().orEmpty()).optString("url").takeIf{it.isNotBlank()}}}catch(_:Exception){null}
