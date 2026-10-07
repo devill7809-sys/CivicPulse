@@ -15,6 +15,8 @@ For the server, copy `server/.env.example` to `server/.env` and provide real val
 `FIREBASE_STORAGE_BUCKET`. Supply these credentials externally and never commit `.env`.
 The current server implementation reads environment variables; a service-account JSON file is not required or loaded.
 
+Set `VISION_SERVICE_TOKEN` to the same externally supplied random secret in the server and vision-service environments. The server sends it only to the internal `/analyze` endpoint; do not expose it to browser/mobile clients or commit real values. Keep the vision service on a private network as an additional deployment boundary.
+
 Deploy the Firestore and Storage rules from the repository root after replacing the
 placeholder default project in `.firebaserc` or selecting a project explicitly:
 
@@ -41,6 +43,7 @@ pip install -r requirements.txt
 uvicorn app:app --host 0.0.0.0 --port 8001 --reload
 ```
 The first model request downloads model weights. For a small demo machine, use CPU and expect slower inference.
+Configure `VISION_SERVICE_TOKEN` in the vision-service process environment before starting it. The Python service does not automatically load `.env` files; `vision-service/.env.example` documents the required variable for your deployment secret manager or process supervisor.
 
 ## 4. Admin
 ```bash

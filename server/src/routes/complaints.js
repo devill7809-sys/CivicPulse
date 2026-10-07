@@ -6,7 +6,7 @@ import path from 'path';
 import os from 'os';
 import { db, storage } from '../firebase.js';
 import { requireAdmin, requireAuth } from '../middleware/auth.js';
-import { analyzeComplaint } from '../services/ai.js';
+import { analyzeComplaint, normalizeAiResultOrFallback, safeAiFailure } from '../services/ai.js';
 import { messaging } from '../firebase.js';
 import { sendComplaintStatusNotification } from '../services/notifications.js';
 import { createComplaintStatusHandler } from '../services/complaint-status.js';
@@ -62,13 +62,14 @@ router.post('/', requireAuth, upload.single('evidence'), async (req,res)=>{
 
     const snapshot = await db.collection('complaints').limit(300).get();
     const existing = snapshot.docs.map(d=>({id:d.id,...d.data()}));
-    let ai = {available:false};
+    let ai = safeAiFailure();
     try {
       ai = await analyzeComplaint({imagePath: tempFilePath || undefined, text:description, category, lat:Number(lat), lng:Number(lng), existingComplaints:existing});
-    } catch (e) {
-      console.warn('AI unavailable:', e.message);
-      ai = {available:false, error:e.message};
+    } catch (error) {
+      console.warn('AI analysis unavailable', {code:error?.code, name:error?.name});
+      ai = safeAiFailure();
     }
+    ai = normalizeAiResultOrFallback(ai);
 
     const id = `CP-${uuid().slice(0,8).toUpperCase()}`;
     const doc = {

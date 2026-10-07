@@ -1,0 +1,1 @@
+export const VISION_REQUEST_TIMEOUT_MS = 20_000;
