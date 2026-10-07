@@ -4,7 +4,7 @@ import { v4 as uuid } from 'uuid';
 import fs from 'fs';
 import path from 'path';
 import { db } from '../firebase.js';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAdmin, requireAuth } from '../middleware/auth.js';
 import { analyzeComplaint } from '../services/ai.js';
 
 const router = express.Router();
@@ -50,12 +50,12 @@ router.get('/mine', requireAuth, async (req,res)=>{
   res.json(snap.docs.map(d=>d.data()).sort((a,b)=>b.createdAt.localeCompare(a.createdAt)));
 });
 
-router.get('/', requireAuth, async (req,res)=>{
+router.get('/', requireAuth, requireAdmin, async (req,res)=>{
   const snap = await db.collection('complaints').limit(500).get();
   res.json(snap.docs.map(d=>d.data()).sort((a,b)=>b.createdAt.localeCompare(a.createdAt)));
 });
 
-router.patch('/:id/status', requireAuth, async (req,res)=>{
+router.patch('/:id/status', requireAuth, requireAdmin, async (req,res)=>{
   const {status, resolutionNote=''} = req.body;
   if (!['PENDING','IN_PROGRESS','RESOLVED','REJECTED'].includes(status)) return res.status(400).json({error:'Invalid status'});
   await db.collection('complaints').doc(req.params.id).update({status,resolutionNote,updatedAt:new Date().toISOString()});

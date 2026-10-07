@@ -4,7 +4,9 @@
   "type": "module",
   "scripts": {
     "dev": "node --watch src/server.js",
-    "start": "node src/server.js"
+    "start": "node src/server.js",
+    "test": "node --test",
+    "admin:set-claim": "node scripts/set-admin-claim.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
