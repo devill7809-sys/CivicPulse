@@ -5,7 +5,8 @@ import {signInWithEmailAndPassword,onAuthStateChanged,User} from 'firebase/auth'
 import {adminAuth} from './firebase';
 
 type Complaint={id:string;category:string;description:string;status:string;priority:string;address?:string;createdAt:string;location?:{lat:number,lng:number};ai?:any;evidence?:{storagePath:string;originalName:string;contentType:string;size:number}|null};
-const API='http://localhost:5000/api';
+const API=import.meta.env.VITE_API_BASE_URL || (import.meta.env.DEV ? 'http://localhost:5000/api' : '');
+if(!API)throw new Error('VITE_API_BASE_URL is required outside development.');
 function Login(){const [email,setEmail]=useState('');const [password,setPassword]=useState('');const [msg,setMsg]=useState('');return <div className="login"><h1>CivicPulse Admin</h1><input placeholder="Admin email" value={email} onChange={e=>setEmail(e.target.value)}/><input placeholder="Password" type="password" value={password} onChange={e=>setPassword(e.target.value)}/><button onClick={()=>signInWithEmailAndPassword(adminAuth,email,password).catch(e=>setMsg(e.message))}>Sign in</button><p>{msg}</p></div>}
 function App(){
  const [user,setUser]=useState<User|null>(null); useEffect(()=>onAuthStateChanged(adminAuth,setUser),[]); if(!user)return <Login/>;

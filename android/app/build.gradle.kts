@@ -1,8 +1,24 @@
 plugins { id("com.android.application"); id("org.jetbrains.kotlin.android"); id("org.jetbrains.kotlin.plugin.compose"); id("com.google.gms.google-services") }
 
+val apiBaseUrl = providers.gradleProperty("civicpulseApiBaseUrl").orElse("http://10.0.2.2:5000/api")
+val escapedApiBaseUrl = apiBaseUrl.get().replace("\\", "\\\\").replace("\"", "\\\"")
+
 android { namespace="com.civicpulse"; compileSdk=35
- defaultConfig { applicationId="com.civicpulse"; minSdk=26; targetSdk=35; versionCode=1; versionName="1.0"; buildConfigField("String","API_BASE_URL","\"http://10.0.2.2:5000/api\"") }
+ defaultConfig { applicationId="com.civicpulse"; minSdk=26; targetSdk=35; versionCode=1; versionName="1.0"; buildConfigField("String","API_BASE_URL","\"$escapedApiBaseUrl\"") }
  buildFeatures { compose=true; buildConfig=true }
+}
+
+val verifyReleaseApiBaseUrl by tasks.registering {
+	doLast {
+		val configuredUrl = providers.gradleProperty("civicpulseApiBaseUrl").orNull
+		if (configuredUrl == null || !configuredUrl.startsWith("https://")) {
+			throw GradleException("Release builds require -PcivicpulseApiBaseUrl=https://<your-api-host>/api")
+		}
+	}
+}
+
+tasks.matching { it.name == "preReleaseBuild" }.configureEach {
+	dependsOn(verifyReleaseApiBaseUrl)
 }
 
 dependencies {
